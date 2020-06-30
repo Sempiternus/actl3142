@@ -1,0 +1,545 @@
+library(readxl)
+library(dplyr)
+library(summarytools)
+library(ggplot2)
+library(lubridate)
+#install.packages("checkmate")
+
+setwd("C:/Users/Sempi/Documents/LIKE ACTUAL FUCKING WORK/ACTL3142")
+
+Beneficiary <- read.csv("Medicare_Beneficiary.csv")
+Inpatient <- read.csv("Medicare_Inpatient.csv")
+Outpatient <- read.csv("Medicare_Outpatient.csv")
+Provider <- read.csv("Medicare_Provider.csv")
+
+Fraud <- filter(Provider, Fraud == "Yes")
+
+Inpatient <- Inpatient %>%
+  left_join(Fraud)
+Inpatient[["Fraud"]][is.na(Inpatient[["Fraud"]])] <- "No"
+
+Outpatient <- Outpatient %>%
+  left_join(Fraud)
+Outpatient[["Fraud"]][is.na(Outpatient[["Fraud"]])] <- "No"
+
+summary(filter(Inpatient, Fraud == "Yes"))
+
+summarytools::descr(Inpatient)
+
+summarytools::descr(filter(Inpatient, Fraud == "Yes"))
+
+InpatientC <- left_join(Inpatient,Beneficiary)
+OutpatientC <- left_join(Outpatient,Beneficiary)
+InpatientC$ClaimDuration<- difftime(InpatientC$ClaimEndDt ,InpatientC$ClaimStartDt , units = c("days"))
+InpatientC$Age <- 2009 - year(InpatientC$DOB)
+InpatientC$ClaimDuration <- round(InpatientC$ClaimDuration, digits = 0)
+InpatientC$ClaimDuration <- as.numeric(InpatientC$ClaimDuration)
+InpatientC$Month <- month(InpatientC$ClaimStartDt) 
+
+summary(Provider)
+
+InpatientC <- InpatientC %>% mutate(Agegroup = case_when(Age >= 85 ~ '85+',
+                                                         Age >= 80  & Age <= 84 ~ '80-84',
+                                                         Age >= 75  & Age <= 79 ~ '75-79',
+                                                         Age >= 70  & Age <= 74 ~ '70-74',
+                                                         Age >= 65  & Age <= 69 ~ '65-69',
+                                                         Age >= 60  & Age <= 64 ~ '60-64',
+                                                         Age >= 55  & Age <= 59 ~ '55-59',
+                                                         Age >= 50  & Age <= 54 ~ '50-54',
+                                                         Age >= 45  & Age <= 49 ~ '45-49',
+                                                         Age >= 40  & Age <= 44 ~ '40-44',
+                                                         Age >= 35  & Age <= 39 ~ '35-39',
+                                                         Age >= 30  & Age <= 34 ~ '30-34',
+                                                         Age >= 25  & Age <= 29 ~ '25-29',
+                                                         Age >= 20  & Age <= 24 ~ '20-24',
+                                                         Age >= 15  & Age <= 19 ~ '15-19',
+                                                         Age >= 10  & Age <= 14 ~ '10-14',
+                                                         Age >= 5  & Age <= 9 ~ '5-9',
+                                                         Age >= 0  & Age <= 4 ~ '0-4'))
+
+
+
+########
+##Age Group
+InpatientC %>%
+  select(Fraud, Agegroup) %>%
+  filter(Fraud == "Yes") %>%
+  count(Agegroup) %>%
+  mutate(freq = n*100 / sum(n)) %>%
+  ggplot(aes(x = Agegroup, y = freq)) +
+  ggtitle("Claims per Age Group (Percentage of all Claims (Fradulent Providers))") +
+  ylab("% of Claims") +
+  geom_bar(stat = "identity") +
+  ylim(0, 20)
+
+InpatientC %>%
+  select(Fraud, Agegroup) %>%
+  filter(Fraud == "No") %>%
+  count(Agegroup) %>%
+  mutate(freq = n*100 / sum(n)) %>%
+  ggplot(aes(x = Agegroup, y = freq)) +
+  ggtitle("Claims per Age Group (Percentage of all Claims (Non-Fradulent Providers))") +
+  ylab("% of Claims") +
+  geom_bar(stat = "identity") +
+  ylim(0, 20)
+
+##Claims Duration
+InpatientC %>%
+  select(Fraud, ClaimDuration) %>%
+  filter(Fraud == "No") %>%
+  summarise(mean = mean(ClaimDuration))
+
+InpatientC %>%
+  select(Fraud, ClaimDuration) %>%
+  filter(Fraud == "No") %>%
+  with(hist(ClaimDuration, 
+            main = "Histogram for non-Fradulent Claims",
+            xlab = "Claim Duration (Days)",
+            ylim = c(0, 3000),
+            breaks = 30))
+
+InpatientC %>%
+  select(Fraud, ClaimDuration) %>%
+  filter(Fraud == "Yes") %>%
+  summarise(mean = mean(ClaimDuration))
+
+InpatientC %>%
+  select(Fraud, ClaimDuration) %>%
+  filter(Fraud == "Yes") %>%
+  with(hist(ClaimDuration, 
+            main = "Histogram for Fradulent Claims",
+            xlab = "Claim Duration (Days)",
+            ylim = c(0, 3000),
+            breaks = 30))
+
+##Claims Reimbursed
+InpatientC %>% 
+  filter(Fraud == "Yes") %>%
+  group_by(Month) %>% 
+  summarise(mean=mean(InscClaimAmtReimbursed)) %>%
+  ggplot(aes(x = Month, y = mean)) +
+  ggtitle("Average Claims Reinbursed per Month (Fraudulent Providers)") +
+  ylab("Average Claim Size Reinbursed") +
+  geom_bar(stat = "identity") +
+  scale_x_continuous(breaks=c(1:12))
+
+InpatientC %>% 
+  filter(Fraud == "No") %>%
+  group_by(Month) %>% 
+  summarise(mean=mean(InscClaimAmtReimbursed)) %>%
+  ggplot(aes(x = Month, y = mean)) +
+  ggtitle("Average Claims Reinbursed per Month (non-Fraudulent Providers)") +
+  ylab("Average Claim Size Reinbursed") +
+  geom_bar(stat = "identity") +
+  scale_x_continuous(breaks=c(1:12))
+
+##Claim Count
+InpatientC %>% 
+  filter(Fraud == "No") %>%
+  group_by(Month) %>% 
+  count(Month) %>%
+  mutate(Average = n/4036) %>%
+  ggplot(aes(x = Month, y = Average)) +
+  geom_bar(stat = "identity") +
+  ggtitle("Average Claims made per Provider (non-Fraudulent Providers)") +
+  ylab("Average Claims made per Provider") +
+  geom_bar(stat = "identity") +
+  scale_x_continuous(breaks=c(1:12))
+
+InpatientC %>% 
+  filter(Fraud == "Yes") %>%
+  group_by(Month) %>% 
+  count(Month) %>%
+  mutate(Average = n/400) %>%
+  ggplot(aes(x = Month, y = Average)) +
+  geom_bar(stat = "identity") +
+  ggtitle("Average Claims made per Provider (Fraudulent Providers)") +
+  ylab("Average Claims made per Provider") +
+  geom_bar(stat = "identity") +
+  scale_x_continuous(breaks=c(1:12))
+
+##Operating Physician
+InpatientC %>% 
+  select(Fraud, OperatingPhysician) %>%
+  filter(Fraud == "Yes") %>%
+  group_by(OperatingPhysician) %>%
+  summarize(freq=n()) %>%
+  na.omit() %>%
+  arrange(desc(freq)) %>%
+  top_n(20) %>%
+  ggplot(aes(x = OperatingPhysician, y = freq)) +
+  geom_bar(stat = "identity") +
+  ggtitle("Operating Physicians with highest Claim frequency (Fradulent Providers)") +
+  ylab("Claims made") +
+  theme(text = element_text(size=14),
+        axis.text.x = element_text(angle=90, hjust=1)) 
+
+InpatientC %>% 
+  select(Fraud, OperatingPhysician) %>%
+  filter(Fraud == "No") %>%
+  group_by(OperatingPhysician) %>%
+  summarize(freq=n()) %>%
+  na.omit() %>%
+  arrange(desc(freq)) %>%
+  top_n(20) %>%
+  ggplot(aes(x = OperatingPhysician, y = freq)) +
+  geom_bar(stat = "identity") +
+  ggtitle("Operating Physicians with highest Claim frequency (non-Fradulent Providers)") +
+  ylab("Claims made") +
+  theme(text = element_text(size=14),
+        axis.text.x = element_text(angle=90, hjust=1)) 
+
+##Attending Physician 
+
+InpatientC %>% 
+  select(Fraud, AttendingPhysician) %>%
+  filter(Fraud == "Yes") %>%
+  group_by(AttendingPhysician) %>%
+  summarize(freq=n()) %>%
+  na.omit() %>%
+  arrange(desc(freq)) %>%
+  top_n(20) %>%
+  ggplot(aes(x = AttendingPhysician, y = freq)) +
+  geom_bar(stat = "identity") +
+  ggtitle("Attending Physicians with highest Claim frequency (Fradulent Providers)") +
+  ylab("Claims made") +
+  theme(text = element_text(size=14),
+        axis.text.x = element_text(angle=90, hjust=1)) 
+
+InpatientC %>% 
+  select(Fraud, AttendingPhysician) %>%
+  filter(Fraud == "No") %>%
+  group_by(AttendingPhysician) %>%
+  summarize(freq=n()) %>%
+  na.omit() %>%
+  arrange(desc(freq)) %>%
+  top_n(20) %>%
+  ggplot(aes(x = AttendingPhysician, y = freq)) +
+  geom_bar(stat = "identity") +
+  ggtitle("Attending Physicians with highest Claim frequency (non-Fradulent Providers)") +
+  ylab("Claims made") +
+  theme(text = element_text(size=14),
+        axis.text.x = element_text(angle=90, hjust=1)) 
+
+##State
+InpatientC %>% 
+  filter(Fraud == "No") %>%
+  group_by(State) %>% 
+  count(State) %>%
+  ggplot(aes(x = State, y = n)) +
+  geom_bar(stat = "identity") +
+  ggtitle("Claims by State (Non-Fraudulent)") +
+  ylab("Number of associated claims")
+
+InpatientC %>% 
+  filter(Fraud == "No") %>%
+  group_by(State) %>% 
+  summarize(freq=n())%>%
+  arrange(desc(freq)) %>%
+  top_n(10)
+
+InpatientC %>% 
+  filter(Fraud == "Yes") %>%
+  group_by(State) %>% 
+  count(State) %>%
+  ggplot(aes(x = State, y = n)) +
+  geom_bar(stat = "identity") +
+  ggtitle("Claims by State (Fraudulent)") +
+  ylab("Number of associated claims")
+
+InpatientC %>% 
+  filter(Fraud == "Yes") %>%
+  group_by(State) %>% 
+  summarize(freq=n())%>%
+  arrange(desc(freq)) %>%
+  top_n(10)
+
+##County
+InpatientC %>% 
+  filter(Fraud == "No") %>%
+  group_by(County) %>% 
+  count(County) %>%
+  ggplot(aes(x = County, y = n)) +
+  geom_bar(stat = "identity") +
+  ggtitle("Claims by County (Non-Fraudulent)") +
+  ylab("Number of associated claims")
+
+InpatientC %>% 
+  filter(Fraud == "No") %>%
+  group_by(County) %>% 
+  summarize(freq=n())%>%
+  arrange(desc(freq)) %>%
+  top_n(10)
+
+InpatientC %>% 
+  filter(Fraud == "Yes") %>%
+  group_by(County) %>% 
+  count(County) %>%
+  ggplot(aes(x = County, y = n)) +
+  geom_bar(stat = "identity") +
+  ggtitle("Claims by County (Fraudulent)") +
+  ylab("Number of associated claims")
+
+InpatientC %>% 
+  filter(Fraud == "Yes") %>%
+  group_by(County) %>% 
+  summarize(freq=n())%>%
+  arrange(desc(freq)) %>%
+  top_n(10)
+
+
+###############
+##Outpatient
+OutpatientC$ClaimDuration<- difftime(OutpatientC$ClaimEndDt ,OutpatientC$ClaimStartDt , units = c("days"))
+OutpatientC$Age <- 2009 - year(OutpatientC$DOB)
+OutpatientC$ClaimDuration <- round(OutpatientC$ClaimDuration, digits = 0)
+OutpatientC$ClaimDuration <- as.numeric(OutpatientC$ClaimDuration)
+OutpatientC$Month <- month(OutpatientC$ClaimStartDt) 
+OutpatientC <- OutpatientC %>% mutate(Agegroup = case_when(Age >= 85 ~ '85+',
+                                                           Age >= 80  & Age <= 84 ~ '80-84',
+                                                           Age >= 75  & Age <= 79 ~ '75-79',
+                                                           Age >= 70  & Age <= 74 ~ '70-74',
+                                                           Age >= 65  & Age <= 69 ~ '65-69',
+                                                           Age >= 60  & Age <= 64 ~ '60-64',
+                                                           Age >= 55  & Age <= 59 ~ '55-59',
+                                                           Age >= 50  & Age <= 54 ~ '50-54',
+                                                           Age >= 45  & Age <= 49 ~ '45-49',
+                                                           Age >= 40  & Age <= 44 ~ '40-44',
+                                                           Age >= 35  & Age <= 39 ~ '35-39',
+                                                           Age >= 30  & Age <= 34 ~ '30-34',
+                                                           Age >= 25  & Age <= 29 ~ '25-29',
+                                                           Age >= 20  & Age <= 24 ~ '20-24',
+                                                           Age >= 15  & Age <= 19 ~ '15-19',
+                                                           Age >= 10  & Age <= 14 ~ '10-14',
+                                                           Age >= 5  & Age <= 9 ~ '5-9',
+                                                           Age >= 0  & Age <= 4 ~ '0-4'))
+
+
+
+########
+##Age Group
+OutpatientC %>%
+  select(Fraud, Agegroup) %>%
+  filter(Fraud == "Yes") %>%
+  count(Agegroup) %>%
+  mutate(freq = n*100 / sum(n)) %>%
+  ggplot(aes(x = Agegroup, y = freq)) +
+  ggtitle("Claims per Age Group (Percentage of all Claims (Fradulent Providers))") +
+  ylab("% of Claims") +
+  geom_bar(stat = "identity") +
+  ylim(0, 20)
+
+OutpatientC %>%
+  select(Fraud, Agegroup) %>%
+  filter(Fraud == "No") %>%
+  count(Agegroup) %>%
+  mutate(freq = n*100 / sum(n)) %>%
+  ggplot(aes(x = Agegroup, y = freq)) +
+  ggtitle("Claims per Age Group (Percentage of all Claims (Non-Fradulent Providers))") +
+  ylab("% of Claims") +
+  geom_bar(stat = "identity") +
+  ylim(0, 20)
+
+##Claims Duration
+OutpatientC %>%
+  select(Fraud, ClaimDuration) %>%
+  filter(Fraud == "Yes") %>%
+  summarise(mean = mean(ClaimDuration))
+
+OutpatientC %>%
+  select(Fraud, ClaimDuration) %>%
+  filter(Fraud == "No") %>%
+  summarise(mean = mean(ClaimDuration))
+
+OutpatientC %>%
+  select(Fraud, ClaimDuration) %>%
+  filter(Fraud == "No") %>%
+  with(hist(ClaimDuration, 
+            main = "Histogram for non-Fradulent Claims",
+            xlab = "Claim Duration (Days)",
+            ylim = c(0, 3000),
+            breaks = 30))
+
+OutpatientC %>%
+  select(Fraud, ClaimDuration) %>%
+  filter(Fraud == "Yes") %>%
+  with(hist(ClaimDuration, 
+            main = "Histogram for Fradulent Claims",
+            xlab = "Claim Duration (Days)",
+            ylim = c(0, 3000),
+            breaks = 30))
+
+##Claims Reimbursed
+OutpatientC %>% 
+  filter(Fraud == "Yes") %>%
+  group_by(Month) %>% 
+  summarise(mean=mean(InscClaimAmtReimbursed)) %>%
+  ggplot(aes(x = Month, y = mean)) +
+  ggtitle("Average Claims Reinbursed per Month (Fraudulent Providers)") +
+  ylab("Average Claim Size Reinbursed") +
+  geom_bar(stat = "identity") +
+  scale_x_continuous(breaks=c(1:12))
+
+OutpatientC %>% 
+  filter(Fraud == "No") %>%
+  group_by(Month) %>% 
+  summarise(mean=mean(InscClaimAmtReimbursed)) %>%
+  ggplot(aes(x = Month, y = mean)) +
+  ggtitle("Average Claims Reinbursed per Month (non-Fraudulent Providers)") +
+  ylab("Average Claim Size Reinbursed") +
+  geom_bar(stat = "identity") +
+  scale_x_continuous(breaks=c(1:12))
+
+##Claim Count
+OutpatientC %>% 
+  filter(Fraud == "No") %>%
+  group_by(Month) %>% 
+  count(Month) %>%
+  mutate(Average = n/4036) %>%
+  ggplot(aes(x = Month, y = Average)) +
+  geom_bar(stat = "identity") +
+  ggtitle("Average Claims made per Provider (non-Fraudulent Providers)") +
+  ylab("Average Claims made per Provider") +
+  geom_bar(stat = "identity") +
+  scale_x_continuous(breaks=c(1:12))
+
+OutpatientC %>% 
+  filter(Fraud == "Yes") %>%
+  group_by(Month) %>% 
+  count(Month) %>%
+  mutate(Average = n/400) %>%
+  ggplot(aes(x = Month, y = Average)) +
+  geom_bar(stat = "identity") +
+  ggtitle("Average Claims made per Provider (Fraudulent Providers)") +
+  ylab("Average Claims made per Provider") +
+  geom_bar(stat = "identity") +
+  scale_x_continuous(breaks=c(1:12))
+
+##Operating Physician
+OutpatientC %>% 
+  select(Fraud, OperatingPhysician) %>%
+  filter(Fraud == "Yes") %>%
+  group_by(OperatingPhysician) %>%
+  summarize(freq=n()) %>%
+  na.omit() %>%
+  arrange(desc(freq)) %>%
+  top_n(20) %>%
+  ggplot(aes(x = OperatingPhysician, y = freq)) +
+  geom_bar(stat = "identity") +
+  ggtitle("Operating Physicians with highest Claim frequency (Fradulent Providers)") +
+  ylab("Claims made") +
+  theme(text = element_text(size=14),
+        axis.text.x = element_text(angle=90, hjust=1)) 
+
+OutpatientC %>% 
+  select(Fraud, OperatingPhysician) %>%
+  filter(Fraud == "No") %>%
+  group_by(OperatingPhysician) %>%
+  summarize(freq=n()) %>%
+  na.omit() %>%
+  arrange(desc(freq)) %>%
+  top_n(20) %>%
+  ggplot(aes(x = OperatingPhysician, y = freq)) +
+  geom_bar(stat = "identity") +
+  ggtitle("Operating Physicians with highest Claim frequency (non-Fradulent Providers)") +
+  ylab("Claims made") +
+  theme(text = element_text(size=14),
+        axis.text.x = element_text(angle=90, hjust=1)) 
+
+##Attending Physician
+OutpatientC %>% 
+  select(Fraud, AttendingPhysician) %>%
+  filter(Fraud == "Yes") %>%
+  group_by(AttendingPhysician) %>%
+  summarize(freq=n()) %>%
+  na.omit() %>%
+  arrange(desc(freq)) %>%
+  top_n(20) %>%
+  ggplot(aes(x = AttendingPhysician, y = freq)) +
+  geom_bar(stat = "identity") +
+  ggtitle("Attending Physicians with highest Claim frequency (Fradulent Providers)") +
+  ylab("Claims made") +
+  theme(text = element_text(size=14),
+        axis.text.x = element_text(angle=90, hjust=1)) 
+
+OutpatientC %>% 
+  select(Fraud, AttendingPhysician) %>%
+  filter(Fraud == "No") %>%
+  group_by(AttendingPhysician) %>%
+  summarize(freq=n()) %>%
+  na.omit() %>%
+  arrange(desc(freq)) %>%
+  top_n(20) %>%
+  ggplot(aes(x = AttendingPhysician, y = freq)) +
+  geom_bar(stat = "identity") +
+  ggtitle("Attending Physicians with highest Claim frequency (non-Fradulent Providers)") +
+  ylab("Claims made") +
+  theme(text = element_text(size=14),
+        axis.text.x = element_text(angle=90, hjust=1)) 
+
+##State
+OutpatientC %>% 
+  filter(Fraud == "No") %>%
+  group_by(State) %>% 
+  count(State) %>%
+  ggplot(aes(x = State, y = n)) +
+  geom_bar(stat = "identity") +
+  ggtitle("Claims by State (Non-Fraudulent)") +
+  ylab("Number of associated claims")
+
+OutpatientC %>% 
+  filter(Fraud == "No") %>%
+  group_by(State) %>% 
+  summarize(freq=n())%>%
+  arrange(desc(freq)) %>%
+  top_n(10)
+
+OutpatientC %>% 
+  filter(Fraud == "Yes") %>%
+  group_by(State) %>% 
+  count(State) %>%
+  ggplot(aes(x = State, y = n)) +
+  geom_bar(stat = "identity") +
+  ggtitle("Claims by State (Fraudulent)") +
+  ylab("Number of associated claims")
+
+OutpatientC %>% 
+  filter(Fraud == "Yes") %>%
+  group_by(State) %>% 
+  summarize(freq=n())%>%
+  arrange(desc(freq)) %>%
+  top_n(10)
+
+##County
+OutpatientC %>% 
+  filter(Fraud == "No") %>%
+  group_by(County) %>% 
+  count(County) %>%
+  ggplot(aes(x = County, y = n)) +
+  geom_bar(stat = "identity") +
+  ggtitle("Claims by County (Non-Fraudulent)") +
+  ylab("Number of associated claims")
+
+OutpatientC %>% 
+  filter(Fraud == "No") %>%
+  group_by(County) %>% 
+  summarize(freq=n())%>%
+  arrange(desc(freq)) %>%
+  top_n(10)
+
+OutpatientC %>% 
+  filter(Fraud == "Yes") %>%
+  group_by(County) %>% 
+  count(County) %>%
+  ggplot(aes(x = County, y = n)) +
+  geom_bar(stat = "identity") +
+  ggtitle("Claims by County (Fraudulent)") +
+  ylab("Number of associated claims")
+
+OutpatientC %>% 
+  filter(Fraud == "Yes") %>%
+  group_by(County) %>% 
+  summarize(freq=n())%>%
+  arrange(desc(freq)) %>%
+  top_n(10)
+
