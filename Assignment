@@ -5,39 +5,30 @@ library(ggplot2)
 library(lubridate)
 #install.packages("checkmate")
 
-setwd("C:/Users/Sempi/Documents/LIKE ACTUAL FUCKING WORK/ACTL3142")
-
+#Read Data
 Beneficiary <- read.csv("Medicare_Beneficiary.csv")
 Inpatient <- read.csv("Medicare_Inpatient.csv")
 Outpatient <- read.csv("Medicare_Outpatient.csv")
 Provider <- read.csv("Medicare_Provider.csv")
 
+#Merging Datasets together
 Fraud <- filter(Provider, Fraud == "Yes")
-
 Inpatient <- Inpatient %>%
   left_join(Fraud)
 Inpatient[["Fraud"]][is.na(Inpatient[["Fraud"]])] <- "No"
-
 Outpatient <- Outpatient %>%
   left_join(Fraud)
 Outpatient[["Fraud"]][is.na(Outpatient[["Fraud"]])] <- "No"
-
-summary(filter(Inpatient, Fraud == "Yes"))
-
-summarytools::descr(Inpatient)
-
-summarytools::descr(filter(Inpatient, Fraud == "Yes"))
-
 InpatientC <- left_join(Inpatient,Beneficiary)
 OutpatientC <- left_join(Outpatient,Beneficiary)
+
+#Inpatient Data
+#Add Variables; Duration, Age, Month and Age Group
 InpatientC$ClaimDuration<- difftime(InpatientC$ClaimEndDt ,InpatientC$ClaimStartDt , units = c("days"))
 InpatientC$Age <- 2009 - year(InpatientC$DOB)
 InpatientC$ClaimDuration <- round(InpatientC$ClaimDuration, digits = 0)
 InpatientC$ClaimDuration <- as.numeric(InpatientC$ClaimDuration)
 InpatientC$Month <- month(InpatientC$ClaimStartDt) 
-
-summary(Provider)
-
 InpatientC <- InpatientC %>% mutate(Agegroup = case_when(Age >= 85 ~ '85+',
                                                          Age >= 80  & Age <= 84 ~ '80-84',
                                                          Age >= 75  & Age <= 79 ~ '75-79',
@@ -58,8 +49,15 @@ InpatientC <- InpatientC %>% mutate(Agegroup = case_when(Age >= 85 ~ '85+',
                                                          Age >= 0  & Age <= 4 ~ '0-4'))
 
 
+#Summary Functions in order to gain a brief overview into data and identify possible trends/characteristics to further investigate
+summary(Provider)
+summary(filter(Inpatient, Fraud == "Yes"))
+summary(filter(Inpatient, Fraud == "No"))
+summarytools::descr(Inpatient)
+summarytools::descr(filter(Inpatient, Fraud == "Yes"))
+summarytools::descr(filter(Inpatient, Fraud == "No"))
 
-########
+################################################
 ##Age Group
 InpatientC %>%
   select(Fraud, Agegroup) %>%
@@ -85,7 +83,6 @@ InpatientC %>%
 
 ##Claims Duration
 InpatientC %>%
-  select(Fraud, ClaimDuration) %>%
   filter(Fraud == "No") %>%
   summarise(mean = mean(ClaimDuration))
 
@@ -99,7 +96,6 @@ InpatientC %>%
             breaks = 30))
 
 InpatientC %>%
-  select(Fraud, ClaimDuration) %>%
   filter(Fraud == "Yes") %>%
   summarise(mean = mean(ClaimDuration))
 
@@ -124,6 +120,10 @@ InpatientC %>%
   scale_x_continuous(breaks=c(1:12))
 
 InpatientC %>% 
+  filter(Fraud == "Yes") %>%
+  summarise(mean=mean(InscClaimAmtReimbursed))
+  
+InpatientC %>% 
   filter(Fraud == "No") %>%
   group_by(Month) %>% 
   summarise(mean=mean(InscClaimAmtReimbursed)) %>%
@@ -133,6 +133,10 @@ InpatientC %>%
   geom_bar(stat = "identity") +
   scale_x_continuous(breaks=c(1:12))
 
+InpatientC %>% 
+  filter(Fraud == "No") %>%
+  summarise(mean=mean(InscClaimAmtReimbursed))
+  
 ##Claim Count
 InpatientC %>% 
   filter(Fraud == "No") %>%
@@ -190,7 +194,6 @@ InpatientC %>%
         axis.text.x = element_text(angle=90, hjust=1)) 
 
 ##Attending Physician 
-
 InpatientC %>% 
   select(Fraud, AttendingPhysician) %>%
   filter(Fraud == "Yes") %>%
@@ -232,13 +235,6 @@ InpatientC %>%
   ylab("Number of associated claims")
 
 InpatientC %>% 
-  filter(Fraud == "No") %>%
-  group_by(State) %>% 
-  summarize(freq=n())%>%
-  arrange(desc(freq)) %>%
-  top_n(10)
-
-InpatientC %>% 
   filter(Fraud == "Yes") %>%
   group_by(State) %>% 
   count(State) %>%
@@ -246,13 +242,6 @@ InpatientC %>%
   geom_bar(stat = "identity") +
   ggtitle("Claims by State (Fraudulent)") +
   ylab("Number of associated claims")
-
-InpatientC %>% 
-  filter(Fraud == "Yes") %>%
-  group_by(State) %>% 
-  summarize(freq=n())%>%
-  arrange(desc(freq)) %>%
-  top_n(10)
 
 ##County
 InpatientC %>% 
@@ -265,13 +254,6 @@ InpatientC %>%
   ylab("Number of associated claims")
 
 InpatientC %>% 
-  filter(Fraud == "No") %>%
-  group_by(County) %>% 
-  summarize(freq=n())%>%
-  arrange(desc(freq)) %>%
-  top_n(10)
-
-InpatientC %>% 
   filter(Fraud == "Yes") %>%
   group_by(County) %>% 
   count(County) %>%
@@ -279,14 +261,6 @@ InpatientC %>%
   geom_bar(stat = "identity") +
   ggtitle("Claims by County (Fraudulent)") +
   ylab("Number of associated claims")
-
-InpatientC %>% 
-  filter(Fraud == "Yes") %>%
-  group_by(County) %>% 
-  summarize(freq=n())%>%
-  arrange(desc(freq)) %>%
-  top_n(10)
-
 
 ###############
 ##Outpatient
@@ -342,12 +316,10 @@ OutpatientC %>%
 
 ##Claims Duration
 OutpatientC %>%
-  select(Fraud, ClaimDuration) %>%
   filter(Fraud == "Yes") %>%
   summarise(mean = mean(ClaimDuration))
 
 OutpatientC %>%
-  select(Fraud, ClaimDuration) %>%
   filter(Fraud == "No") %>%
   summarise(mean = mean(ClaimDuration))
 
@@ -379,7 +351,11 @@ OutpatientC %>%
   ylab("Average Claim Size Reinbursed") +
   geom_bar(stat = "identity") +
   scale_x_continuous(breaks=c(1:12))
-
+  
+OutpatientC %>% 
+  filter(Fraud == "Yes") %>%
+  summarise(mean=mean(InscClaimAmtReimbursed))
+  
 OutpatientC %>% 
   filter(Fraud == "No") %>%
   group_by(Month) %>% 
@@ -389,6 +365,10 @@ OutpatientC %>%
   ylab("Average Claim Size Reinbursed") +
   geom_bar(stat = "identity") +
   scale_x_continuous(breaks=c(1:12))
+  
+  OutpatientC %>% 
+  filter(Fraud == "No") %>%
+  summarise(mean=mean(InscClaimAmtReimbursed))
 
 ##Claim Count
 OutpatientC %>% 
@@ -488,13 +468,6 @@ OutpatientC %>%
   ylab("Number of associated claims")
 
 OutpatientC %>% 
-  filter(Fraud == "No") %>%
-  group_by(State) %>% 
-  summarize(freq=n())%>%
-  arrange(desc(freq)) %>%
-  top_n(10)
-
-OutpatientC %>% 
   filter(Fraud == "Yes") %>%
   group_by(State) %>% 
   count(State) %>%
@@ -502,13 +475,6 @@ OutpatientC %>%
   geom_bar(stat = "identity") +
   ggtitle("Claims by State (Fraudulent)") +
   ylab("Number of associated claims")
-
-OutpatientC %>% 
-  filter(Fraud == "Yes") %>%
-  group_by(State) %>% 
-  summarize(freq=n())%>%
-  arrange(desc(freq)) %>%
-  top_n(10)
 
 ##County
 OutpatientC %>% 
@@ -521,13 +487,6 @@ OutpatientC %>%
   ylab("Number of associated claims")
 
 OutpatientC %>% 
-  filter(Fraud == "No") %>%
-  group_by(County) %>% 
-  summarize(freq=n())%>%
-  arrange(desc(freq)) %>%
-  top_n(10)
-
-OutpatientC %>% 
   filter(Fraud == "Yes") %>%
   group_by(County) %>% 
   count(County) %>%
@@ -535,11 +494,3 @@ OutpatientC %>%
   geom_bar(stat = "identity") +
   ggtitle("Claims by County (Fraudulent)") +
   ylab("Number of associated claims")
-
-OutpatientC %>% 
-  filter(Fraud == "Yes") %>%
-  group_by(County) %>% 
-  summarize(freq=n())%>%
-  arrange(desc(freq)) %>%
-  top_n(10)
-
