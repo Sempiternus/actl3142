@@ -1,0 +1,410 @@
+library(readxl)
+setwd('C:/Users/Sempi/Documents/LIKE ACTUAL FUCKING WORK/ACTL3142')
+require(ISLR)
+library(dplyr)
+library(lubridate)
+library(fastDummies)
+library(lazyeval)
+library(ROCR)
+library(pROC)
+library(class)
+library(caret)
+library(glmnet)
+library(rpart)
+library(randomForest)
+library(gbm)
+library(e1071)
+
+#import Data
+Beneficiary_Eval <- read.csv("Medicare_Outpatient_Inpatient_Beneficiary_Eval_PartB.csv")
+Provider <- read.csv("Medicare_Provider_PartB.csv")
+Provider_Eval <- read.csv("Medicare_Provider_Eval_PartB.csv")
+Beneficiary <- read.csv("Medicare_Outpatient_Inpatient_Beneficiary_PartB.csv")
+
+#Fix Dates
+Inpatient <- Beneficiary[1:30139, ]
+Outpatient <- Beneficiary[30140:436254, ]
+Outpatient$ClaimStartDt <- dmy(Outpatient$ClaimStartDt)
+Outpatient$ClaimEndDt <- dmy(Outpatient$ClaimEndDt)
+
+Inpatient$ClaimStartDt <- ymd(Inpatient$ClaimStartDt)
+Inpatient$ClaimEndDt <- ymd(Inpatient$ClaimEndDt)
+Outpatient$ClaimStartDt <- ymd(Outpatient$ClaimStartDt)
+Outpatient$ClaimEndDt <- ymd(Outpatient$ClaimEndDt)
+
+Beneficiary <- rbind(Inpatient, Outpatient)
+
+Beneficiary <- Beneficiary %>%
+  left_join(Provider)
+
+#Add some variables
+
+Beneficiary$ClaimDuration<- difftime(Beneficiary$ClaimEndDt ,Beneficiary$ClaimStartDt , units = c("days"))
+Beneficiary$Age <- 2009 - year(Beneficiary$DOB)
+
+#Check for NA
+yes <- Beneficiary %>% 
+  summarise_each(funs(100*mean(is.na(.))))
+
+yes <- t(yes)
+
+#Remove Certain Columns
+data <- select(Beneficiary, -ClmProcedureCode_5, -ClmProcedureCode_6)
+
+##Grouping by Variable
+By_Provider <- Beneficiary %>%
+  group_by(ProviderID) %>%
+  summarize(Provider_Avg_InscClaimAmtReimbursed = mean(InscClaimAmtReimbursed), Provider_Avg_DeductibleAmtPaid = mean(DeductibleAmtPaid), Provider_Avg_NoOfMonths_PartACov = mean(NoOfMonths_PartACov),  Provider_Avg_NoOfMonths_PartBCov = mean(NoOfMonths_PartBCov),  Provider_Avg_IPAnnualReimbursementAmt = mean(IPAnnualReimbursementAmt), Provider_Avg_IPAnnualDeductibleAmt = mean(IPAnnualDeductibleAmt), Provider_Avg_OPAnnualReimbursementAmt = mean(OPAnnualReimbursementAmt), Provider_Avg_OPAnnualDeductibleAmt = mean(OPAnnualDeductibleAmt), Provider_Avg_ClaimDuration = mean(ClaimDuration), Provider_Avg_Age = mean(Age))
+
+By_Beneficiary <- Beneficiary %>%
+  group_by(BeneID) %>%
+  summarize(Bene_Avg_InscClaimAmtReimbursed = mean(InscClaimAmtReimbursed), Bene_Avg_DeductibleAmtPaid = mean(DeductibleAmtPaid), Bene_Avg_NoOfMonths_PartACov = mean(NoOfMonths_PartACov),  Bene_Avg_NoOfMonths_PartBCov = mean(NoOfMonths_PartBCov),  Bene_Avg_IPAnnualReimbursementAmt = mean(IPAnnualReimbursementAmt), Bene_Avg_IPAnnualDeductibleAmt = mean(IPAnnualDeductibleAmt), Bene_Avg_OPAnnualReimbursementAmt = mean(OPAnnualReimbursementAmt), Bene_Avg_OPAnnualDeductibleAmt = mean(OPAnnualDeductibleAmt))
+
+By_AttendingPhysician <- Beneficiary %>%
+  group_by(AttendingPhysician) %>%
+  summarize(AttendingPhysician_Avg_InscClaimAmtReimbursed = mean(InscClaimAmtReimbursed), AttendingPhysician_Avg_DeductibleAmtPaid = mean(DeductibleAmtPaid),  AttendingPhysician_Avg_IPAnnualReimbursementAmt = mean(IPAnnualReimbursementAmt), AttendingPhysician_Avg_IPAnnualDeductibleAmt = mean(IPAnnualDeductibleAmt), AttendingPhysician_Avg_OPAnnualReimbursementAmt = mean(OPAnnualReimbursementAmt), AttendingPhysician_Avg_OPAnnualDeductibleAmt = mean(OPAnnualDeductibleAmt))
+
+By_OperatingPhysician <- Beneficiary %>%
+  group_by(OperatingPhysician) %>%
+  summarize(OperatingPhysician_Avg_InscClaimAmtReimbursed = mean(InscClaimAmtReimbursed), OperatingPhysician_Avg_DeductibleAmtPaid = mean(DeductibleAmtPaid),  OperatingPhysician_Avg_IPAnnualReimbursementAmt = mean(IPAnnualReimbursementAmt), OperatingPhysician_Avg_IPAnnualDeductibleAmt = mean(IPAnnualDeductibleAmt), OperatingPhysician_Avg_OPAnnualReimbursementAmt = mean(OPAnnualReimbursementAmt), OperatingPhysician_Avg_OPAnnualDeductibleAmt = mean(OPAnnualDeductibleAmt))
+
+By_OtherPhysician <- Beneficiary %>%
+  group_by(OtherPhysician) %>%
+  summarize(OtherPhysician_Avg_InscClaimAmtReimbursed = mean(InscClaimAmtReimbursed), OtherPhysician_Avg_DeductibleAmtPaid = mean(DeductibleAmtPaid),  OtherPhysician_Avg_IPAnnualReimbursementAmt = mean(IPAnnualReimbursementAmt), OtherPhysician_Avg_IPAnnualDeductibleAmt = mean(IPAnnualDeductibleAmt), OtherPhysician_Avg_OPAnnualReimbursementAmt = mean(OPAnnualReimbursementAmt), OtherPhysician_Avg_OPAnnualDeductibleAmt = mean(OPAnnualDeductibleAmt))
+
+By_DiagnosisGroupCode <- Beneficiary %>%
+  group_by(DiagnosisGroupCode) %>%
+  summarize(DiagnosisGroupCode_Avg_InscClaimAmtReimbursed = mean(InscClaimAmtReimbursed), DiagnosisGroupCode_Avg_DeductibleAmtPaid = mean(DeductibleAmtPaid),  DiagnosisGroupCode_Avg_IPAnnualReimbursementAmt = mean(IPAnnualReimbursementAmt), DiagnosisGroupCode_Avg_IPAnnualDeductibleAmt = mean(IPAnnualDeductibleAmt), DiagnosisGroupCode_Avg_OPAnnualReimbursementAmt = mean(OPAnnualReimbursementAmt), DiagnosisGroupCode_Avg_OPAnnualDeductibleAmt = mean(OPAnnualDeductibleAmt))
+
+By_ClmAdmitDiagnosisCode <- Beneficiary %>%
+  group_by(ClmAdmitDiagnosisCode) %>%
+  summarize(ClmAdmitDiagnosisCode_Avg_InscClaimAmtReimbursed = mean(InscClaimAmtReimbursed), ClmAdmitDiagnosisCode_Avg_DeductibleAmtPaid = mean(DeductibleAmtPaid),  ClmAdmitDiagnosisCode_Avg_IPAnnualReimbursementAmt = mean(IPAnnualReimbursementAmt), ClmAdmitDiagnosisCode_Avg_IPAnnualDeductibleAmt = mean(IPAnnualDeductibleAmt), ClmAdmitDiagnosisCode_Avg_OPAnnualReimbursementAmt = mean(OPAnnualReimbursementAmt), ClmAdmitDiagnosisCode_Avg_OPAnnualDeductibleAmt = mean(OPAnnualDeductibleAmt))
+
+By_ClmDiagnosisCode_1 <- Beneficiary %>%
+  group_by(ClmDiagnosisCode_1) %>%
+  summarize(ClmDiagnosisCode_1_Avg_InscClaimAmtReimbursed = mean(InscClaimAmtReimbursed), ClmDiagnosisCode_1_Avg_DeductibleAmtPaid = mean(DeductibleAmtPaid),  ClmDiagnosisCode_1_Avg_IPAnnualReimbursementAmt = mean(IPAnnualReimbursementAmt), ClmDiagnosisCode_1_Avg_IPAnnualDeductibleAmt = mean(IPAnnualDeductibleAmt), ClmDiagnosisCode_1_Avg_OPAnnualReimbursementAmt = mean(OPAnnualReimbursementAmt), ClmDiagnosisCode_1_Avg_OPAnnualDeductibleAmt = mean(OPAnnualDeductibleAmt))
+
+
+#Other Grouping Factors
+###Adding Factors
+
+hahatest3 <- data %>% group_by(ProviderID) %>% mutate(Provider_Claims = n())
+
+hahatest3 <- hahatest3 %>% group_by(ProviderID, BeneID) %>% mutate(Provider_BeneID_Claims = n())
+
+hahatest3 <- hahatest3 %>% group_by(ProviderID, AttendingPhysician) %>% mutate(Provider_AttendingPhysician_Claims = n())
+hahatest3 <- hahatest3 %>%
+  mutate(Provider_AttendingPhysician_Claims = ifelse(is.na(AttendingPhysician), 0, Provider_AttendingPhysician_Claims))
+
+hahatest3 <- hahatest3 %>% group_by(ProviderID, OperatingPhysician) %>% mutate(Provider_OperatingPhysician_Claims = n())
+hahatest3 <- hahatest3 %>%
+  mutate(Provider_OperatingPhysician_Claims = ifelse(is.na(OperatingPhysician), 0, Provider_OperatingPhysician_Claims))
+
+hahatest3 <- hahatest3 %>% group_by(ProviderID, OtherPhysician) %>% mutate(Provider_OtherPhysician_Claims = n())
+hahatest3 <- hahatest3 %>%
+  mutate(Provider_OtherPhysician_Claims = ifelse(is.na(OtherPhysician), 0, Provider_OtherPhysician_Claims))
+
+hahatest3 <- hahatest3 %>% 
+  group_by(ProviderID, ClmAdmitDiagnosisCode) %>% mutate(Provider_ClmAdmitDiagnosisCode_Claims = n())
+hahatest3 <- hahatest3 %>%
+  mutate(Provider_ClmAdmitDiagnosisCode_Claims = ifelse(is.na(ClmAdmitDiagnosisCode), 0, Provider_ClmAdmitDiagnosisCode_Claims))
+
+hahatest3 <- hahatest3 %>% 
+  group_by(ProviderID, GroupDiagnosisCode) %>% mutate(Provider_GroupDiagnosisCode_Claims = n())
+hahatest3 <- hahatest3 %>%
+  mutate(Provider_GroupDiagnosisCode_Claims = ifelse(is.na(GroupDiagnosisCode), 0, Provider_GroupDiagnosisCode_Claims))
+
+hahatest3 <- hahatest3 %>% group_by(State) %>% mutate(State_Claims = n())
+
+hahatest3 <- hahatest3 %>% group_by(County) %>% mutate(County_Claims = n())
+
+###Claim Procedure
+hahatest3 <- hahatest3 %>% 
+  group_by(ProviderID, ClmProcedureCode_1) %>% mutate(Provider_ClmProcedureCode_1_Claims = n())
+hahatest3 <- hahatest3 %>%
+  mutate(Provider_ClmProcedureCode_1_Claims = ifelse(is.na(ClmProcedureCode_1), 0, Provider_ClmProcedureCode_1_Claims))
+
+hahatest3 <- hahatest3 %>% 
+  group_by(ProviderID, ClmProcedureCode_2) %>% mutate(Provider_ClmProcedureCode_2_Claims = n())
+hahatest3 <- hahatest3 %>%
+  mutate(Provider_ClmProcedureCode_2_Claims = ifelse(is.na(ClmProcedureCode_2), 0, Provider_ClmProcedureCode_2_Claims))
+
+hahatest3 <- hahatest3 %>% 
+  group_by(ProviderID, ClmProcedureCode_3) %>% mutate(Provider_ClmProcedureCode_3_Claims = n())
+hahatest3 <- hahatest3 %>%
+  mutate(Provider_ClmProcedureCode_3_Claims = ifelse(is.na(ClmProcedureCode_3), 0, Provider_ClmProcedureCode_3_Claims))
+
+hahatest3 <- hahatest3 %>% 
+  group_by(ProviderID, ClmProcedureCode_4) %>% mutate(Provider_ClmProcedureCode_4_Claims = n())
+hahatest3 <- hahatest3 %>%
+  mutate(Provider_ClmProcedureCode_4_Claims = ifelse(is.na(ClmProcedureCode_4), 0, Provider_ClmProcedureCode_4_Claims))
+
+
+#############Claim Diagnosis
+
+hahatest3 <- hahatest3 %>% 
+  group_by(ProviderID, ClmDiagnosisCode_1) %>% mutate(Provider_ClmDiagnosisCode_1_Claims = n())
+hahatest3 <- hahatest3 %>%
+  mutate(Provider_ClmDiagnosisCode_1_Claims = ifelse(is.na(ClmDiagnosisCode_1), 0, Provider_ClmDiagnosisCode_1_Claims))
+
+hahatest3 <- hahatest3 %>% 
+  group_by(ProviderID, ClmDiagnosisCode_2) %>% mutate(Provider_ClmDiagnosisCode_2_Claims = n())
+hahatest3 <- hahatest3 %>%
+  mutate(Provider_ClmDiagnosisCode_2_Claims = ifelse(is.na(ClmDiagnosisCode_2), 0, Provider_ClmDiagnosisCode_2_Claims))
+
+hahatest3 <- hahatest3 %>% 
+  group_by(ProviderID, ClmDiagnosisCode_3) %>% mutate(Provider_ClmDiagnosisCode_3_Claims = n())
+hahatest3 <- hahatest3 %>%
+  mutate(Provider_ClmDiagnosisCode_3_Claims = ifelse(is.na(ClmDiagnosisCode_3), 0, Provider_ClmDiagnosisCode_3_Claims))
+
+hahatest3 <- hahatest3 %>% 
+  group_by(ProviderID, ClmDiagnosisCode_4) %>% mutate(Provider_ClmDiagnosisCode_4_Claims = n())
+hahatest3 <- hahatest3 %>%
+  mutate(Provider_ClmDiagnosisCode_4_Claims = ifelse(is.na(ClmDiagnosisCode_4), 0, Provider_ClmDiagnosisCode_4_Claims))
+
+hahatest3 <- hahatest3 %>% 
+  group_by(ProviderID, ClmDiagnosisCode_5) %>% mutate(Provider_ClmDiagnosisCode_5_Claims = n())
+hahatest3 <- hahatest3 %>%
+  mutate(Provider_ClmDiagnosisCode_5_Claims = ifelse(is.na(ClmDiagnosisCode_5), 0, Provider_ClmDiagnosisCode_5_Claims))
+
+hahatest3 <- hahatest3 %>% 
+  group_by(ProviderID, ClmDiagnosisCode_6) %>% mutate(Provider_ClmDiagnosisCode_6_Claims = n())
+hahatest3 <- hahatest3 %>%
+  mutate(Provider_ClmDiagnosisCode_6_Claims = ifelse(is.na(ClmDiagnosisCode_6), 0, Provider_ClmDiagnosisCode_6_Claims))
+
+hahatest3 <- hahatest3 %>% 
+  group_by(ProviderID, ClmDiagnosisCode_7) %>% mutate(Provider_ClmDiagnosisCode_7_Claims = n())
+hahatest3 <- hahatest3 %>%
+  mutate(Provider_ClmDiagnosisCode_7_Claims = ifelse(is.na(ClmDiagnosisCode_7), 0, Provider_ClmDiagnosisCode_7_Claims))
+
+hahatest3 <- hahatest3 %>% 
+  group_by(ProviderID, ClmDiagnosisCode_8) %>% mutate(Provider_ClmDiagnosisCode_8_Claims = n())
+hahatest3 <- hahatest3 %>%
+  mutate(Provider_ClmDiagnosisCode_8_Claims = ifelse(is.na(ClmDiagnosisCode_8), 0, Provider_ClmDiagnosisCode_8_Claims))
+
+hahatest3 <- hahatest3 %>% 
+  group_by(ProviderID, ClmDiagnosisCode_9) %>% mutate(Provider_ClmDiagnosisCode_9_Claims = n())
+hahatest3 <- hahatest3 %>%
+  mutate(Provider_ClmDiagnosisCode_9_Claims = ifelse(is.na(ClmDiagnosisCode_9), 0, Provider_ClmDiagnosisCode_9_Claims))
+
+hahatest3 <- hahatest3 %>% 
+  group_by(ProviderID, ClmDiagnosisCode_10) %>% mutate(Provider_ClmDiagnosisCode_10_Claims = n())
+hahatest3 <- hahatest3 %>%
+  mutate(Provider_ClmDiagnosisCode_10_Claims = ifelse(is.na(ClmDiagnosisCode_10), 0, Provider_ClmDiagnosisCode_10_Claims))
+
+##CHanging some classes to categorical
+haha <- hahatest3 %>%
+  group_by(ProviderID)
+haha <- haha %>%
+  mutate(Fraud = ifelse(Fraud == "No",0,1))
+haha <- haha %>%
+  mutate(DOD = ifelse(is.na(DOD), 0, 1))
+
+haha$Race <- as.factor(haha$Race)
+haha$Gender <- as.factor(haha$Gender)
+haha <- dummy_cols(haha, select_columns = c("Gender", "Race"), remove_first_dummy = TRUE, remove_selected_columns = TRUE)
+haha$ChronicCond_Alzheimer <- as.factor(haha$ChronicCond_Alzheimer)
+haha$ChronicCond_Heartfailure <- as.factor(haha$ChronicCond_Heartfailure)
+haha$ChronicCond_KidneyDisease <- as.factor(haha$ChronicCond_KidneyDisease)
+haha$ChronicCond_Cancer <- as.factor(haha$ChronicCond_Cancer)
+haha$ChronicCond_ObstrPulmonary <- as.factor(haha$ ChronicCond_ObstrPulmonary)
+haha$ChronicCond_Depression <- as.factor(haha$ChronicCond_Depression)
+haha$ChronicCond_Diabetes <- as.factor(haha$ChronicCond_Diabetes)
+haha$ChronicCond_IschemicHeart <- as.factor(haha$ChronicCond_IschemicHeart)
+haha$ChronicCond_Osteoporasis <- as.factor(haha$ChronicCond_Osteoporasis)
+haha$ChronicCond_rheumatoidarthritis <- as.factor(haha$ChronicCond_rheumatoidarthritis)
+haha$ChronicCond_stroke <- as.factor(haha$ChronicCond_stroke)
+haha <- dummy_cols(haha, select_columns = c("ChronicCond_Alzheimer", "ChronicCond_Heartfailure", "ChronicCond_KidneyDisease", "ChronicCond_Cancer", "ChronicCond_ObstrPulmonary", "ChronicCond_Depression", "ChronicCond_Diabetes", "ChronicCond_IschemicHeart", "ChronicCond_Osteoporasis", "ChronicCond_rheumatoidarthritis", "ChronicCond_stroke", "RenalDiseaseIndicator"), remove_first_dummy = TRUE, remove_selected_columns = TRUE)
+
+haha1 <- haha %>%
+  left_join(By_Provider) %>%
+  left_join(By_Beneficiary) %>%
+  left_join(By_AttendingPhysician) %>%
+  left_join(By_OperatingPhysician) %>%
+  left_join(By_OtherPhysician) %>%
+  left_join(By_DiagnosisGroupCode) %>%
+  left_join(By_ClmAdmitDiagnosisCode) %>%
+  left_join(By_ClmDiagnosisCode_1)
+
+finaltest <- select(haha1, -BeneID, -ClaimStartDt, -ClaimEndDt, -ClaimID, -AttendingPhysician, -OperatingPhysician, -OtherPhysician, -AdmissionDt, -DischargeDt, -ClmAdmitDiagnosisCode, -DiagnosisGroupCode, -ClmDiagnosisCode_1, -ClmDiagnosisCode_2, -ClmDiagnosisCode_3, -ClmDiagnosisCode_4, -ClmDiagnosisCode_5, -ClmDiagnosisCode_6, - ClmDiagnosisCode_7, -ClmDiagnosisCode_8, -ClmDiagnosisCode_9, -ClmDiagnosisCode_10, -ClmProcedureCode_1, -ClmProcedureCode_2, -ClmProcedureCode_3, -ClmProcedureCode_4, -DOB, -DOD, -State, -County)
+finaltest1 <- dummy_cols(finaltest, select_columns = c("ClaimType"), remove_first_dummy = TRUE, remove_selected_columns = TRUE)
+finaltest1 <- select(finaltest1, -Fraud)
+
+##Imputing with 0 here. Can Also impute after aggregation? Test later. 
+finaltest1 <- finaltest1 %>% mutate_each( funs_( interp( ~replace(., is.na(.),0) ) ) )
+
+##Aggregate to Provider Level
+Final_Test <- finaltest1 %>% group_by(ProviderID) %>% summarize_all(sum)
+
+#Check NAs
+no <- Final_Test %>% 
+  summarise_each(funs(100*mean(is.na(.))))
+no <- t(no)
+
+#Convert Integers to Numeric and Scale
+#Final_Test[2:102] <- lapply(Final_Test[2:102], as.numeric)
+#Final_Test <- Final_Test%>%mutate_if(is.numeric,scale)
+
+##ALTERNATIVELY: INSTEAD OF STANDARDISING, NORMALISE
+#normalisation of data 
+normalise <- function(x) {
+  return ((x - min(x)) / (max(x) - min(x)))
+}
+Final_Test[2:104] <- lapply(Final_Test[2:104], as.character)
+Final_Test[2:104] <- lapply(Final_Test[2:104], as.numeric)
+Final_Test[2:104] <- as.data.frame(lapply(Final_Test[2:104], normalise))
+
+Final_Test <- Final_Test %>%
+  left_join(Provider)
+
+##Splitting Into training/test
+set.seed(104)
+sample <- sample.int(n = nrow(Final_Test), size = floor(.75*nrow(Final_Test)), replace = F)
+Train_Final <- Final_Test[sample, ]
+Test_Final  <- Final_Test[-sample, ]
+
+#Fixing Train
+Train_Final <- select(Train_Final, -ProviderID)
+
+##Fixing Test 
+Test_Provider <- as.data.frame(Test_Final$ProviderID)
+Test_Final <- select(Test_Final, -Fraud)
+
+############################Logistic Model############################
+validation <- as.data.frame(Test_Provider$`Test_Final$ProviderID`)
+colnames(validation) <- c("ProviderID")
+validation <- validation %>%
+  left_join(Provider)
+
+g = glm(Fraud ~. , data=Train_Final, family=binomial)
+
+
+##Prediction
+Predictions <- predict(g, Test_Final, type="response")
+Predictions <- as.data.frame(Predictions)
+
+##Checking Predictions
+Predictions$ProviderID <- Test_Provider$`Test_Final$ProviderID`
+Predictions <- Predictions %>%
+  left_join(Provider)
+Logroc = roc(Predictions$Fraud ~ Predictions$Predictions, plot = TRUE, print.auc = TRUE)
+
+##Model 2: After Using Lasso Coefficients
+Logistic_Train <- Train_Final %>% select(InscClaimAmtReimbursed, Provider_Avg_InscClaimAmtReimbursed, Provider_Avg_DeductibleAmtPaid, OperatingPhysician_Avg_InscClaimAmtReimbursed, Fraud)
+Logistic_Test<- Test_Final %>% select(ProviderID, InscClaimAmtReimbursed, Provider_Avg_InscClaimAmtReimbursed, Provider_Avg_DeductibleAmtPaid, OperatingPhysician_Avg_InscClaimAmtReimbursed)
+g2 = glm(Fraud ~. , data=Logistic_Train, family=binomial)
+Predictions2 <- predict(g2, Test_Final, type="response")
+Predictions2 <- as.data.frame(Predictions2)
+Logroc2 = roc(validation$Fraud ~ Predictions2$Predictions2, plot = TRUE, print.auc = TRUE)
+
+
+############################K-NEAREST NEIGHBOURS############################
+set.seed(400)
+ctrl <- trainControl(method="repeatedcv",repeats = 3)
+knnFit <- train(Fraud ~ ., data = Train_Final, method = "knn", trControl = ctrl, preProcess = c("center","scale"),tuneLength = 20)
+knnFit
+
+
+knnPredictions <- predict(knnFit, Test_Final, type="prob")
+knnROC <- roc(validation$Fraud,knnPredictions[,"No"], plot = TRUE, print.auc = TRUE)
+
+
+########LASSO################
+
+x <- model.matrix(Fraud~. , Train_Final)[, -1]
+y <- ifelse(Train_Final$Fraud == "Yes", 1, 0)
+
+set.seed(1)
+cv.lasso <- cv.glmnet(x, y, alpha = 1, family = "binomial")
+best_lambda = cv.lasso$lambda.min
+#0.0008733909
+lassoPredictions <- as.data.frame(as.numeric(predict(cv.lasso, newx=as.matrix(Test_Final[, -1]), type="response" , s=best_lambda)))
+lassoroc = roc(validation$Fraud ~ lassoPredictions$`as.numeric(predict(cv.lasso, newx = as.matrix(Test_Final[, -1]), type = "response", s = best_lambda))`, plot = TRUE, print.auc = TRUE)
+
+
+############RIDGE###########################
+
+set.seed(1)
+cv.ridge <- cv.glmnet(x, y, alpha = 0, family = "binomial")
+best_ridge = cv.ridge$lambda.min
+#0.0159895
+ridgePredictions <- as.data.frame(as.numeric(predict(cv.ridge, newx=as.matrix(Test_Final[, -1]), type="response" , s=best_lambda)))
+Ridgeroc = roc(validation$Fraud ~ ridgePredictions$`as.numeric(predict(cv.ridge, newx = as.matrix(Test_Final[, -1]), type = "response", s = best_lambda))`, plot = TRUE, print.auc = TRUE)
+
+
+#########Classification Tree###########
+set.seed(1)
+tree.fit <- rpart(Fraud~. ,
+                  method="class", data=Train_Final)
+tree.fit$cptable[which.min(tree.fit$cptable[,"xerror"]),"CP"]
+#0.01333333
+pfit<- prune(tree.fit, cp=tree.fit$cptable[which.min(tree.fit$cptable[,"xerror"]),"CP"])
+
+plot(pfit, uniform=TRUE,
+     main="Pruned Classification Tree")
+text(pfit, use.n=TRUE, all=TRUE, cex=.8)
+
+treePredictions <- predict(pfit, Test_Final,type="prob")
+TP <- as.data.frame(treePredictions)
+treeROC <- roc(validation$Fraud,treePredictions[,"No"], plot = TRUE, print.auc = TRUE)
+
+######RANDOM FOREST####
+
+set.seed(1)
+rf <-randomForest(Fraud~.,data=Train_Final, ntree=500)
+print(rf)
+
+set.seed(1)
+mtry <- tuneRF(Train_Final[-104],Train_Final$Fraud, ntreeTry=500,
+               stepFactor=1.5,improve=0.01, trace=TRUE, plot=TRUE)
+best.m <- mtry[mtry[, 2] == min(mtry[, 2]), 1]
+print(mtry)
+print(best.m)
+#10 is the best for mtry, and the default used
+
+set.seed(1)
+rf <-randomForest(Fraud~.,data=Train_Final, ntree=500, mtry = 7)
+
+ForestPredictions <- predict(rf, Test_Final,type="prob")
+FP <- as.data.frame(ForestPredictions)
+forestROC <- roc(validation$Fraud,FP[,"No"], plot = TRUE, print.auc = TRUE)
+
+#####BOOSTING####
+set.seed(1)
+Boost_Train <- Train_Final %>%
+  mutate(Fraud= ifelse(Fraud == "No",0,1))
+boost.fit=gbm(Fraud~.,data=Boost_Train,distribution="adaboost",n.trees=5000,interaction.depth=4)
+
+BoostPredictions <- predict(boost.fit, Test_Final,type="response")
+BP <- as.data.frame(BoostPredictions)
+
+Boostroc = roc(validation$Fraud ~ BoostPredictions, plot = TRUE, print.auc = TRUE)
+
+###SVM#### 
+set.seed(1)
+model_svm <- svm (Fraud~. , Train_Final, probability = TRUE)
+obj <- tune(svm, Fraud~., data = Train_Final, 
+            ranges = list(gamma = 2^(-1:1), cost = 2^(2:4)),
+            tunecontrol = tune.control(sampling = "fix"))
+summary(obj)
+plot(obj)
+#Gamma = 2, Cost=4
+
+svm.fit <- svm (Fraud~. , Train_Final, gamma = 2, cost = 4, probability = TRUE)
+
+SVMPredictions <- predict(svm.fit, Test_Final, probability = TRUE)
+SP <- as.data.frame(attr(SVMPredictions, "probabilities"))
+SPROC <- roc(validation$Fraud,SP[,"No"], plot = TRUE, print.auc = TRUE)
+
+##BIG PLOT
+roclist <- list("Logistic Regression" = Logroc, "K-Nearest-Neighbours" = knnROC, "Lasso Regression" = lassoroc, "Ridge Regression" = Ridgeroc, "Classification Tree" = treeROC, "Random Forest" = forestROC, "Boosting" = Boostroc, "Support Vector Machine" = SPROC)
+
+ggroc(roclist) +
+  ggtitle("Comparison of ROC")
+
+##Importance
+varImpPlot(rf)
+
+summary(
+  boost.fit, 
+  cBars = 10)
